@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"rdbms/src/index"
+	"rdbms/src/sort"
 )
 
 type ColumnType int
@@ -79,6 +81,7 @@ type TableI interface {
 	Insert(tableName string, record Record) error
 	GetAllData(tableName string, filters []Filter, selectedColumns SelectedColumns) ([]map[string]any, error)
 	GetTableSchema(schemaName string) (Schema, error)
+	CreateIndex(tableName, columnName string) error
 }
 
 const PageSize = 8192
@@ -168,6 +171,170 @@ func (tm *TableManager) GetTableSchema(schemaName string) (schema Schema, err er
 	schema = DeserializeSchema(data)
 
 	return schema, nil
+}
+
+func (tm *TableManager) CreateIndex(tableName, columnName string) error {
+	indexFileName := tableName + "_" + columnName + ".index"
+	if tm.FileManager.FileExists(indexFileName) {
+		return errors.New("index already exists")
+	}
+
+	schema, err := tm.GetTableSchema(tableName + ".schema")
+	if err != nil {
+		return err
+	}
+
+	var columnIndex int
+	var columnType ColumnType
+	found := false
+	for i, col := range schema.Columns {
+		if col.Name == columnName {
+			columnIndex = i
+			columnType = col.Type
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return errors.New("column not found in table schema")
+	}
+
+	if columnType != TypeInt && columnType != TypeFloat {
+		return errors.New("only int and float columns can be indexed")
+	}
+
+	type IndexEntry struct {
+		Value      interface{}
+		PageNumber uint64
+		RecordSlot uint16
+	}
+
+	var entries []IndexEntry
+
+	fsmSize, err := tm.FileManager.GetFileSize(tableName + ".fsm")
+	if err != nil {
+		return err
+	}
+
+	if fsmSize == 0 {
+		_, err := tm.FileManager.CreateFile(indexFileName)
+		return err
+	}
+
+	fsmBinaryData, err := tm.FileManager.Read(tableName+".fsm", 0, fsmSize)
+	if err != nil {
+		return err
+	}
+
+	fsmData := DeserializeFSM(fsmBinaryData)
+	pagesCount := len(fsmData)
+	emptyFree := PageSize - 8
+
+	for pageNum := 1; pageNum <= pagesCount; pageNum++ {
+		fsmFree := int(fsmData[pageNum-1])
+		if fsmFree >= emptyFree {
+			continue
+		}
+
+		offsetBytes := int64((pageNum - 1) * PageSize)
+		page, err := tm.FileManager.Read(tableName+".table", offsetBytes, int64(PageSize))
+		if err != nil {
+			return err
+		}
+
+		recordCount := uint16(binary.LittleEndian.Uint16(page[0:2]))
+		offset := PageSize
+
+		for slotIndex := uint16(0); slotIndex < recordCount; slotIndex++ {
+			recordOffset := uint16(binary.LittleEndian.Uint16(page[offset-2 : offset]))
+			offset -= 2
+			recordLength := uint16(binary.LittleEndian.Uint16(page[offset-2 : offset]))
+			offset -= 2
+
+			columnProjection := make(map[int]ColumnProjection)
+			for i := range schema.Columns {
+				columnProjection[i] = ColumnProjection{
+					Name:        schema.Columns[i].Name,
+					Index:       i,
+					MustExtract: i == columnIndex,
+					IsProjected: i == columnIndex,
+				}
+			}
+
+			record := DeserializeRecord(schema, page[recordOffset:recordOffset+recordLength], columnProjection)
+			if record != nil && len(record.Items) > 0 {
+				value := record.Items[0].Literal
+
+				entries = append(entries, IndexEntry{
+					Value:      value,
+					PageNumber: uint64(pageNum),
+					RecordSlot: slotIndex,
+				})
+			}
+		}
+	}
+
+	// Convert to sort.IndexEntry format
+	sortEntries := make([]sort.IndexEntry, len(entries))
+	for i, entry := range entries {
+		sortEntries[i] = sort.IndexEntry{
+			Value:      entry.Value,
+			PageNumber: entry.PageNumber,
+			RecordSlot: entry.RecordSlot,
+		}
+	}
+
+	// Sort based on column type
+	isInt := columnType == TypeInt
+	sortedEntries := sort.QuickSortIndexEntries(sortEntries, isInt)
+
+	fmt.Printf("Sorted %d entries\n", len(sortedEntries))
+
+	// Build B-tree from sorted entries
+	btree := index.BuildBTree(sortedEntries, isInt)
+
+	// Print B-tree statistics
+	fmt.Printf("\nB-tree Statistics:\n")
+	fmt.Printf("  Root Position: %d\n", btree.RootPosition)
+	fmt.Printf("  Total Nodes: %d\n", btree.NodeCount)
+	fmt.Printf("  Type: ")
+	if btree.IsInt {
+		fmt.Printf("Integer\n")
+	} else {
+		fmt.Printf("Float\n")
+	}
+
+	// Print node details
+	leafCount := 0
+	internalCount := 0
+	for _, node := range btree.Nodes {
+		if node.NodeType == index.LeafNode {
+			leafCount++
+		} else {
+			internalCount++
+		}
+	}
+	fmt.Printf("  Leaf Nodes: %d\n", leafCount)
+	fmt.Printf("  Internal Nodes: %d\n", internalCount)
+
+	// Print first few entries from first leaf to verify
+	if len(btree.Nodes) > 0 {
+		firstLeaf := btree.Nodes[0]
+		fmt.Printf("\nFirst Leaf Node (first 5 entries):\n")
+		for i := 0; i < 5 && i < int(firstLeaf.KeyCount); i++ {
+			fmt.Printf("  Key: %v, Page: %d, Slot: %d\n",
+				firstLeaf.Keys[i],
+				firstLeaf.Values[i].PageNumber,
+				firstLeaf.Values[i].RecordSlot)
+		}
+	}
+
+	fmt.Printf("\n✓ Index created: %s\n", indexFileName)
+
+	// TODO: Serialize and write to file
+
+	return nil
 }
 
 func (tm *TableManager) Insert(tableName string, record Record) error {
