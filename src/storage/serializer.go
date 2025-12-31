@@ -295,6 +295,77 @@ func DeserializeRecord(schema Schema, data []byte, columnProjection map[int]Colu
 	return &Record{Items: items}
 }
 
+// bu yerda child bilan value qismiga aniq joy ajratib berilishi kerak
+func SerializeIndexNode(node Node) []byte {
+	var buf bytes.Buffer
+
+	binary.Write(&buf, binary.LittleEndian, node.NodeType) // 1 byte
+	binary.Write(&buf, binary.LittleEndian, node.KeyCount) // 1 byte
+
+	for _, ptr := range node.ChildPointers {
+		binary.Write(&buf, binary.LittleEndian, ptr)
+	}
+
+	for _, entry := range node.Values {
+		binary.Write(&buf, binary.LittleEndian, entry.Value)
+		binary.Write(&buf, binary.LittleEndian, entry.RecordListPointer)
+	}
+
+	return buf.Bytes()
+}
+
+func DeserializeIndexNode(data []byte) Node {
+	node := Node{}
+	offset := 0
+
+	node.NodeType = NodeType(data[offset])
+	offset++
+
+	node.KeyCount = int8(data[offset])
+	offset++
+
+	if node.NodeType != NodeTypeLeaf && node.NodeType != NodeTypeRootNoChild {
+		childCount := int(node.KeyCount) + 1
+		node.ChildPointers = make([]uint64, childCount)
+
+		for i := 0; i < childCount; i++ {
+			node.ChildPointers[i] = binary.LittleEndian.Uint64(data[offset : offset+8])
+			offset += 8
+		}
+	}
+
+	node.Values = make([]ValueEntry, node.KeyCount)
+	for i := 0; i < int(node.KeyCount); i++ {
+		node.Values[i].Value = int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+		offset += 8
+		node.Values[i].RecordListPointer = int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+		offset += 8
+	}
+
+	return node
+}
+
+func SerializeIndexHeader(header NodeHeader) []byte {
+	var buf bytes.Buffer
+	binary.Write(&buf, binary.LittleEndian, header.RootPointer)
+	binary.Write(&buf, binary.LittleEndian, header.FreeSpacePointer)
+	binary.Write(&buf, binary.LittleEndian, header.NodeCount)
+	binary.Write(&buf, binary.LittleEndian, header.Height)
+
+	return buf.Bytes()
+}
+
+func DeserializeIndexHeader(data []byte) NodeHeader {
+	node_type_header := NodeHeader{}
+
+	node_type_header.RootPointer = binary.LittleEndian.Uint64(data[0:8])
+	node_type_header.FreeSpacePointer = binary.LittleEndian.Uint64(data[8:16])
+	node_type_header.NodeCount = binary.LittleEndian.Uint64(data[16:24])
+	node_type_header.Height = binary.LittleEndian.Uint64(data[24:32])
+
+	return node_type_header
+}
+
 func DeserializeFSM(data []byte) []uint16 {
 	if len(data)%2 != 0 {
 		return []uint16{}

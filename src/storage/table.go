@@ -79,6 +79,12 @@ type TableI interface {
 	Insert(tableName string, record Record) error
 	GetAllData(tableName string, filters []Filter, selectedColumns SelectedColumns) ([]map[string]any, error)
 	GetTableSchema(schemaName string) (Schema, error)
+
+	CreateIndex(tableName string, columnName string) error
+	GetIndexHeader(fileName string) (NodeHeader, error)
+	GetNodeById(fileName string, node_id int64) (Node, error)
+	GetNode(fileName string, node_pointer int64) (Node, error)
+	InsetValueToIndex(indexName string, valueEntry ValueEntry) error
 }
 
 const PageSize = 8192
@@ -260,50 +266,6 @@ func (tm *TableManager) GetAllData(tableName string, filters []Filter, selectedC
 
 	return data, nil
 
-}
-
-func recordFilter(record Record, filters []Filter, schema Schema) bool {
-	for _, filter := range filters {
-		recordValue := record.Items[filter.ColumnIndex].Literal
-		filterValue := filter.Value
-		columnType := schema.Columns[filter.ColumnIndex].Type
-
-		switch filter.Operator {
-		case string(OpEq):
-			if !compareEqual(recordValue, filterValue, columnType) {
-				return false
-			}
-		case string(OpNe):
-			if compareEqual(recordValue, filterValue, columnType) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func compareEqual(a, b interface{}, colType ColumnType) bool {
-	switch colType {
-	case TypeInt:
-		v1, ok1 := a.(int64)
-		v2, ok2 := b.(int64)
-		if ok1 && ok2 {
-			return v1 == v2
-		}
-	case TypeFloat:
-		v1, ok1 := a.(float64)
-		v2, ok2 := b.(float64)
-		if ok1 && ok2 {
-			return v1 == v2
-		}
-	case TypeVarchar, TypeDate, TypeTimestamp:
-		v1, ok1 := a.(string)
-		v2, ok2 := b.(string)
-		if ok1 && ok2 {
-			return v1 == v2
-		}
-	}
-	return false
 }
 
 func (tm *TableManager) FindOrCreatePage(tableName string, record []byte) (page []byte, page_order int, err error) {
