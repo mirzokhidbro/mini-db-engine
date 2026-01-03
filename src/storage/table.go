@@ -81,10 +81,16 @@ type TableI interface {
 	GetTableSchema(schemaName string) (Schema, error)
 
 	CreateIndex(tableName string, columnName string) error
-	GetIndexHeader(fileName string) (NodeHeader, error)
+	GetIndexHeader(fileName string) (IndexHeader, error)
 	GetNodeById(fileName string, node_id int64) (Node, error)
 	GetNode(fileName string, node_pointer int64) (Node, error)
-	InsetValueToIndex(indexName string, valueEntry ValueEntry) error
+	InsetValueToIndex(indexName string, value int64, location RecordLocation) error
+	SearchValue(indexName string, value int64) (int64, bool, error)
+
+	CreateRecordListFile(tableName string, columnName string) error
+	GetRecordListFileHeader(fileName string) (RecordListFileHeader, error)
+	AddValueToRecordListFile(fileName string, recordListHead int64, location RecordLocation) (int64, error)
+	GetRecordsByValue(fileName string, recordListHead int64) ([]RecordLocation, error)
 }
 
 const PageSize = 8192
