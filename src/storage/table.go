@@ -31,9 +31,10 @@ const (
 )
 
 type Column struct {
-	Name   string
-	Type   ColumnType
-	Length int
+	Name      string
+	Type      ColumnType
+	Length    int
+	IsIndexed bool
 }
 
 type Schema struct {

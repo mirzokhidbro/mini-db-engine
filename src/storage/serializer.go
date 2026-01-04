@@ -15,6 +15,7 @@ func SerializeSchema(schema *Schema) []byte {
 		size += 2 + len(col.Name)
 		size += 2
 		size += 2
+		size += 1
 	}
 
 	buf := make([]byte, size)
@@ -35,6 +36,13 @@ func SerializeSchema(schema *Schema) []byte {
 
 		binary.LittleEndian.PutUint16(buf[offset:], uint16(col.Length))
 		offset += 2
+
+		if col.IsIndexed {
+			buf[offset] = 1
+		} else {
+			buf[offset] = 0
+		}
+		offset += 1
 	}
 
 	return buf
@@ -58,7 +66,15 @@ func DeserializeSchema(schema []byte) Schema {
 		column_capacity := binary.LittleEndian.Uint16(schema[offset : offset+2])
 		offset += 2
 
-		columns = append(columns, Column{Name: string(column_name), Type: ColumnType(column_type), Length: int(column_capacity)})
+		isIndexed := schema[offset] == 1
+		offset += 1
+
+		columns = append(columns, Column{
+			Name:      string(column_name),
+			Type:      ColumnType(column_type),
+			Length:    int(column_capacity),
+			IsIndexed: isIndexed,
+		})
 		column_count--
 	}
 
