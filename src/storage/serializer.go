@@ -160,7 +160,9 @@ func DeserializeRecord(schema Schema, data []byte, columnProjection map[int]Colu
 		case TypeInt:
 			if must_extract {
 				val := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
-				if is_filtered {
+				// Only match values if the column needs filtering and is not indexed.
+				// Indexed column values are already filtered via B-tree lookup, so no need to match again.
+				if is_filtered && !columnProjection[i].IsIndexedColumn {
 					filterValue, ok := columnProjection[i].FilterValue.(int64)
 					if !ok {
 						return nil

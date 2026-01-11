@@ -258,9 +258,9 @@ func (tm *TableManager) GetAllData(tableName string, filters []Filter, selectedC
 		return nil, err
 	}
 
-	columnProjection := BuildColumnProjection(schema, filters, selectedColumns)
-
 	canUseIndex, indexFilters := tm.CanUseIndexForFilters(tableName, schema, filters)
+
+	columnProjection := BuildColumnProjection(schema, indexFilters, selectedColumns)
 
 	if canUseIndex {
 
@@ -475,15 +475,17 @@ func BuildColumnProjection(schema Schema, filters []Filter, selectedColumns Sele
 	for i, column := range schema.Columns {
 		isFiltered := filteredCols[column.Name]
 		isProjected := projectedCols[column.Name]
+		isIndexedColumn, _ := filteringIndexedColumns[column.Name].(bool)
 
 		projection[i] = ColumnProjection{
-			Name:           column.Name,
-			Index:          i,
-			IsFiltered:     isFiltered,
-			IsProjected:    isProjected,
-			MustExtract:    isFiltered || isProjected,
-			FilterValue:    filterValues[column.Name],
-			FilterOperator: filterOperator[column.Name],
+			Name:            column.Name,
+			Index:           i,
+			IsFiltered:      isFiltered,
+			IsProjected:     isProjected,
+			MustExtract:     isFiltered || isProjected,
+			FilterValue:     filterValues[column.Name],
+			FilterOperator:  filterOperator[column.Name],
+			IsIndexedColumn: isIndexedColumn,
 		}
 	}
 
