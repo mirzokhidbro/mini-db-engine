@@ -15,6 +15,7 @@ func SerializeSchema(schema *Schema) []byte {
 		size += 2 + len(col.Name)
 		size += 2
 		size += 2
+		size += 1
 	}
 
 	buf := make([]byte, size)
@@ -35,6 +36,13 @@ func SerializeSchema(schema *Schema) []byte {
 
 		binary.LittleEndian.PutUint16(buf[offset:], uint16(col.Length))
 		offset += 2
+
+		if col.IsIndexed && col.Type == TypeInt {
+			buf[offset] = 1
+		} else {
+			buf[offset] = 0
+		}
+		offset += 1
 	}
 
 	return buf
@@ -58,7 +66,15 @@ func DeserializeSchema(schema []byte) Schema {
 		column_capacity := binary.LittleEndian.Uint16(schema[offset : offset+2])
 		offset += 2
 
-		columns = append(columns, Column{Name: string(column_name), Type: ColumnType(column_type), Length: int(column_capacity)})
+		isIndexed := schema[offset] == 1
+		offset += 1
+
+		columns = append(columns, Column{
+			Name:      string(column_name),
+			Type:      ColumnType(column_type),
+			Length:    int(column_capacity),
+			IsIndexed: isIndexed,
+		})
 		column_count--
 	}
 
@@ -144,7 +160,9 @@ func DeserializeRecord(schema Schema, data []byte, columnProjection map[int]Colu
 		case TypeInt:
 			if must_extract {
 				val := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
-				if is_filtered {
+				// Only match values if the column needs filtering and is not indexed.
+				// Indexed column values are already filtered via B-tree lookup, so no need to match again.
+				if is_filtered && !columnProjection[i].IsIndexedColumn {
 					filterValue, ok := columnProjection[i].FilterValue.(int64)
 					if !ok {
 						return nil
@@ -293,6 +311,144 @@ func DeserializeRecord(schema Schema, data []byte, columnProjection map[int]Colu
 	}
 
 	return &Record{Items: items}
+}
+
+func SerializeIndexNode(node Node) []byte {
+	var buf bytes.Buffer
+
+	binary.Write(&buf, binary.LittleEndian, node.NodeType)
+	binary.Write(&buf, binary.LittleEndian, node.KeyCount)
+
+	for _, ptr := range node.ChildPointers {
+		binary.Write(&buf, binary.LittleEndian, ptr)
+	}
+
+	for _, entry := range node.Values {
+		binary.Write(&buf, binary.LittleEndian, entry.Value)
+		binary.Write(&buf, binary.LittleEndian, entry.RecordListHead)
+	}
+
+	return buf.Bytes()
+}
+
+func DeserializeIndexNode(data []byte) Node {
+	node := Node{}
+	offset := 0
+
+	node.NodeType = NodeType(data[offset])
+	offset++
+
+	node.KeyCount = int8(data[offset])
+	offset++
+
+	if node.NodeType != NodeTypeLeaf && node.NodeType != NodeTypeRootLeaf {
+		childCount := int(node.KeyCount) + 1
+		node.ChildPointers = make([]uint64, childCount)
+
+		for i := 0; i < childCount; i++ {
+			node.ChildPointers[i] = binary.LittleEndian.Uint64(data[offset : offset+8])
+			offset += 8
+		}
+	}
+
+	node.Values = make([]ValueEntry, node.KeyCount)
+	for i := 0; i < int(node.KeyCount); i++ {
+		node.Values[i].Value = int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+		offset += 8
+		node.Values[i].RecordListHead = int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+		offset += 8
+	}
+
+	return node
+}
+
+func SerializeIndexHeader(header IndexHeader) []byte {
+	var buf bytes.Buffer
+	binary.Write(&buf, binary.LittleEndian, header.RootPointer)
+	binary.Write(&buf, binary.LittleEndian, header.FreeSpacePointer)
+	binary.Write(&buf, binary.LittleEndian, header.NodeCount)
+	binary.Write(&buf, binary.LittleEndian, header.Height)
+
+	return buf.Bytes()
+}
+
+func DeserializeIndexHeader(data []byte) IndexHeader {
+	node_type_header := IndexHeader{}
+
+	node_type_header.RootPointer = int64(binary.LittleEndian.Uint64(data[0:8]))
+	node_type_header.FreeSpacePointer = int64(binary.LittleEndian.Uint64(data[8:16]))
+	node_type_header.NodeCount = int64(binary.LittleEndian.Uint64(data[16:24]))
+	node_type_header.Height = int64(binary.LittleEndian.Uint64(data[24:32]))
+
+	return node_type_header
+}
+
+func SerializeRecordListFileHeader(header RecordListFileHeader) []byte {
+	var buf bytes.Buffer
+	binary.Write(&buf, binary.LittleEndian, header.FreeSpacePointer)
+	binary.Write(&buf, binary.LittleEndian, header.BlockCount)
+	return buf.Bytes()
+}
+
+func DeserializeRecordListFileHeader(data []byte) RecordListFileHeader {
+	header := RecordListFileHeader{}
+	offset := 0
+
+	header.FreeSpacePointer = int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+	offset += 8
+
+	header.BlockCount = int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+	offset += 8
+
+	return header
+}
+
+func SerializeRecordListBlock(block RecordListBlock) []byte {
+	var buf bytes.Buffer
+
+	binary.Write(&buf, binary.LittleEndian, block.Count)
+	binary.Write(&buf, binary.LittleEndian, block.NextBlock)
+
+	for i := 0; i < int(block.Count); i++ {
+		binary.Write(&buf, binary.LittleEndian, block.Locations[i].PageID)
+		binary.Write(&buf, binary.LittleEndian, block.Locations[i].RecordID)
+	}
+
+	currentSize := 1 + 8 + int(block.Count)*10
+	paddingSize := RecordListBlockSize - currentSize
+	if paddingSize > 0 {
+		padding := make([]byte, paddingSize)
+		buf.Write(padding)
+	}
+
+	return buf.Bytes()
+}
+
+func DeserializeRecordListBlock(data []byte) RecordListBlock {
+	block := RecordListBlock{}
+	offset := 0
+
+	block.Count = int8(data[offset])
+	offset += 1
+
+	block.NextBlock = int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+	offset += 8
+
+	for i := 0; i < int(block.Count); i++ {
+		PageID := int64(binary.LittleEndian.Uint64(data[offset : offset+8]))
+		offset += 8
+		RecordID := int16(binary.LittleEndian.Uint16(data[offset : offset+2]))
+		offset += 2
+
+		RecordLocation := RecordLocation{
+			PageID:   PageID,
+			RecordID: RecordID,
+		}
+
+		block.Locations = append(block.Locations, RecordLocation)
+	}
+
+	return block
 }
 
 func DeserializeFSM(data []byte) []uint16 {
