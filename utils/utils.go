@@ -63,9 +63,10 @@ func ToStorageSchema(req models.CreateTableRequest) (storage.Schema, error) {
 		}
 
 		columns = append(columns, storage.Column{
-			Name:   colName,
-			Type:   column_type,
-			Length: length,
+			Name:      colName,
+			Type:      column_type,
+			Length:    length,
+			IsIndexed: c.IsIndexed,
 		})
 	}
 

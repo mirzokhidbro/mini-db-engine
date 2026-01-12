@@ -6,7 +6,8 @@ type CreateTableRequest struct {
 }
 
 type CreateColumn struct {
-	Name   string `json:"name" binding:"required"`
-	Type   int    `json:"type" binding:"required"`
-	Length *int   `json:"length,omitempty"`
+	Name      string `json:"name" binding:"required"`
+	Type      int    `json:"type" binding:"required"`
+	Length    *int   `json:"length,omitempty"`
+	IsIndexed bool   `json:"is_indexed" binding:"required"`
 }
