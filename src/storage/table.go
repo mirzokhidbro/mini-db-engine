@@ -82,6 +82,7 @@ type TableI interface {
 	CreateTable(name string, schema *Schema) error
 	Insert(tableName string, record Record) error
 	Delete(tableName string, filters []Filter) (int, error)
+	Update(tableName string, updatedFields map[string]any, filters []Filter) (int, error)
 	GetAllData(tableName string, filters []Filter, selectedColumns SelectedColumns) ([]map[string]any, error)
 	GetTableSchema(schemaName string) (Schema, error)
 	GetDataByLocation(tableName string, schema Schema, locations []RecordLocation, columnProjection map[int]ColumnProjection) []map[string]any
@@ -654,6 +655,95 @@ func (tm *TableManager) markRecordAsDeleted(tableName string, location RecordLoc
 	}
 
 	return nil
+}
+
+func (tm *TableManager) Update(tableName string, updatedFields map[string]any, filters []Filter) (int, error) {
+	if len(updatedFields) == 0 {
+		return 0, errors.New("updatedFields cannot be empty")
+	}
+
+	schema, err := tm.GetTableSchema(tableName + ".schema")
+	if err != nil {
+		return 0, err
+	}
+
+	canUseIndex, indexFilters := tm.CanUseIndexForFilters(tableName, schema, filters)
+
+	var locationsToUpdate []RecordLocation
+
+	if canUseIndex {
+		locations, err := tm.getRecordLocationsFromIndexedFilters(tableName, indexFilters)
+		if err != nil {
+			return 0, err
+		}
+		locationsToUpdate = locations
+	} else {
+		locations, err := tm.findRecordLocationsByFullScan(tableName, schema, filters)
+		if err != nil {
+			return 0, err
+		}
+		locationsToUpdate = locations
+	}
+
+	if len(locationsToUpdate) == 0 {
+		return 0, nil
+	}
+
+	allColumns := make([]string, 0, len(schema.Columns))
+	for _, col := range schema.Columns {
+		allColumns = append(allColumns, col.Name)
+	}
+	selectedColumns := SelectedColumns{Columns: allColumns}
+	columnProjection := BuildColumnProjection(schema, []Filter{}, selectedColumns)
+
+	var updatedRecords []Record
+
+	for _, location := range locationsToUpdate {
+		offset := int64((location.PageID - 1) * PageSize)
+		page, err := tm.FileManager.Read(tableName+".table", offset, int64(PageSize))
+		if err != nil {
+			continue
+		}
+
+		slotOffset := PageSize - 4*int(location.RecordID)
+		recordLength := binary.LittleEndian.Uint16(page[slotOffset : slotOffset+2])
+		recordBeginningAddress := binary.LittleEndian.Uint16(page[slotOffset+2 : slotOffset+4])
+
+		record := DeserializeRecord(schema, page[recordBeginningAddress:recordBeginningAddress+recordLength], columnProjection)
+		if record == nil {
+			continue
+		}
+
+		newItems := make([]Item, len(schema.Columns))
+		for i, col := range schema.Columns {
+			if newValue, exists := updatedFields[col.Name]; exists {
+				newItems[i] = Item{Literal: newValue}
+			} else {
+				newItems[i] = record.Items[i]
+			}
+		}
+
+		updatedRecords = append(updatedRecords, Record{Items: newItems, IsDeleted: false})
+	}
+
+	for _, location := range locationsToUpdate {
+		err := tm.markRecordAsDeleted(tableName, location)
+		if err != nil {
+			fmt.Printf("Error marking record as deleted at PageID=%d, RecordID=%d: %v\n", location.PageID, location.RecordID, err)
+		}
+	}
+
+	updatedCount := 0
+	for _, record := range updatedRecords {
+		err := tm.Insert(tableName, record)
+		if err != nil {
+			fmt.Printf("Error inserting updated record: %v\n", err)
+			continue
+		}
+		updatedCount++
+	}
+
+	return updatedCount, nil
 }
 
 func (tm *TableManager) findRecordLocationsByFullScan(tableName string, schema Schema, filters []Filter) ([]RecordLocation, error) {

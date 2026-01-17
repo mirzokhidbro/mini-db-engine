@@ -21,3 +21,9 @@ type DeleteRecordsRequest struct {
 	Name   string              `json:"name" binding:"required"`
 	Filter []FilterRequestItem `json:"filter"`
 }
+
+type UpdateRecordsRequest struct {
+	Name   string              `json:"name" binding:"required"`
+	Values map[string]any      `json:"values" binding:"required"`
+	Filter []FilterRequestItem `json:"filter"`
+}

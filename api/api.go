@@ -25,6 +25,7 @@ func SetUpRouter(h handlers.Handler) (r *gin.Engine) {
 		table.Use().POST("insert", h.InsertRecord)
 		table.Use().POST("query", h.GetAllRecords)
 		table.Use().POST("delete", h.DeleteRecords)
+		table.Use().POST("update", h.UpdateRecords)
 	}
 	return
 }

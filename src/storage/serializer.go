@@ -93,12 +93,12 @@ func SerializeRecord(schema Schema, record Record) []byte {
 
 	for i := 0; i < column_count; i++ {
 		switch schema.Columns[i].Type {
-		case TypeInt: // integer
-			literal, ok := record.Items[i].Literal.(int)
+		case TypeInt:
+			literal, ok := record.Items[i].Literal.(int64)
 			if ok {
-				binary.Write(&buf, binary.LittleEndian, int64(literal))
+				binary.Write(&buf, binary.LittleEndian, literal)
 			} else {
-				fmt.Println("invalid data type for integer")
+				fmt.Println("invalid data type for integer, expected int64")
 			}
 		case TypeVarchar: // varchar
 			literal, ok := record.Items[i].Literal.(string)
