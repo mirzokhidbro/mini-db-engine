@@ -2,7 +2,10 @@ module rdbms
 
 go 1.23.3
 
-require github.com/gin-gonic/gin v1.11.0
+require (
+	github.com/gin-gonic/gin v1.11.0
+	github.com/xwb1989/sqlparser v0.0.0-20180606152119-120387863bf2
+)
 
 require (
 	github.com/bytedance/sonic v1.14.0 // indirect
