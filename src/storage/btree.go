@@ -161,7 +161,7 @@ func (tm *TableManager) InsertNodeToWithoutChildRoot(node Node, value int64, loc
 		if err := tm.FileManager.Write(indexName, int64(header.FreeSpacePointer), nodeBinaries[0]); err != nil {
 			return fmt.Errorf("failed to write left leaf: %w", err)
 		}
-		if err := tm.FileManager.Write(indexName, int64(header.FreeSpacePointer)+8192, nodeBinaries[1]); err != nil {
+		if err := tm.FileManager.Write(indexName, int64(header.FreeSpacePointer)+NodeSize, nodeBinaries[1]); err != nil {
 			return fmt.Errorf("failed to write right leaf: %w", err)
 		}
 		if err := tm.FileManager.Write(indexName, int64(header.RootPointer), nodeBinaries[2]); err != nil {
@@ -170,7 +170,7 @@ func (tm *TableManager) InsertNodeToWithoutChildRoot(node Node, value int64, loc
 
 		header.NodeCount += 2
 		header.Height++
-		header.FreeSpacePointer += 8192 * 2
+		header.FreeSpacePointer += NodeSize * 2
 
 		headerData := SerializeIndexHeader(header)
 		if err := tm.FileManager.Write(indexName, 0, headerData); err != nil {
@@ -262,7 +262,7 @@ func (tm *TableManager) SplitRootNode(splittingNode Node, free_space_pointer int
 		newRoot := Node{
 			NodeType:      NodeTypeRootInternal,
 			KeyCount:      1,
-			ChildPointers: []uint64{uint64(free_space_pointer), uint64(free_space_pointer) + 8192},
+			ChildPointers: []uint64{uint64(free_space_pointer), uint64(free_space_pointer) + NodeSize},
 			Values: []ValueEntry{
 				{
 					Value:          splittingNode.Values[2].Value,
@@ -295,7 +295,7 @@ func (tm *TableManager) SplitRootNode(splittingNode Node, free_space_pointer int
 		// Pad all binaries to 8192 bytes
 		binaries := make([][]byte, 0, 3)
 		for _, bin := range [][]byte{leftLeafBinary, rightLeafBinary, newRootBinary} {
-			padding := make([]byte, 8192-len(bin))
+			padding := make([]byte, NodeSize-len(bin))
 			binaries = append(binaries, append(bin, padding...))
 		}
 
@@ -365,7 +365,7 @@ func (tm *TableManager) SplitLeafNode(fullNode Node, parentNode Node, header Ind
 	}
 
 	header.NodeCount++
-	header.FreeSpacePointer += 8192
+	header.FreeSpacePointer += NodeSize
 
 	headerBinary := SerializeIndexHeader(header)
 	if err := tm.FileManager.Write(indexName, 0, headerBinary); err != nil {
@@ -376,7 +376,7 @@ func (tm *TableManager) SplitLeafNode(fullNode Node, parentNode Node, header Ind
 }
 
 func (tm *TableManager) GetIndexHeader(fileName string) (IndexHeader, error) {
-	indexHeaderBinary, err := tm.FileManager.Read(fileName, 0, 32)
+	indexHeaderBinary, err := tm.FileManager.Read(fileName, 0, IndexHeaderSize)
 	if err != nil {
 		return IndexHeader{}, err
 	}
@@ -387,19 +387,19 @@ func (tm *TableManager) GetIndexHeader(fileName string) (IndexHeader, error) {
 }
 
 func (tm *TableManager) GetNodeById(fileName string, node_id int64) (Node, error) {
-	node_binary, err := tm.FileManager.Read(fileName, 32+(node_id-1)*8192, 8192)
+	node_binary, err := tm.FileManager.Read(fileName, IndexHeaderSize+(node_id-1)*NodeSize, NodeSize)
 	if err != nil {
 		return Node{}, err
 	}
 
 	node := DeserializeIndexNode(node_binary)
-	node.Address = node_id * 8192
+	node.Address = node_id * NodeSize
 
 	return node, nil
 }
 
 func (tm *TableManager) GetNode(fileName string, node_pointer int64) (Node, error) {
-	node_binary, err := tm.FileManager.Read(fileName, node_pointer, 8192)
+	node_binary, err := tm.FileManager.Read(fileName, node_pointer, NodeSize)
 	if err != nil {
 		return Node{}, err
 
@@ -418,14 +418,14 @@ func createEmptyRootNode() []byte {
 	}
 	data := SerializeIndexNode(node)
 
-	padding := make([]byte, 8192-len(data))
+	padding := make([]byte, NodeSize-len(data))
 	data = append(data, padding...)
 
 	return data
 }
 
 func padTo8KB(bin []byte) []byte {
-	padding := make([]byte, 8192-len(bin))
+	padding := make([]byte, NodeSize-len(bin))
 	return append(bin, padding...)
 }
 
@@ -484,7 +484,7 @@ func (tm *TableManager) SplitExternalNode(fullNode Node, parentNode Node, header
 	}
 
 	header.NodeCount++
-	header.FreeSpacePointer += 8192
+	header.FreeSpacePointer += NodeSize
 
 	headerBinary := SerializeIndexHeader(header)
 	if err := tm.FileManager.Write(indexName, 0, headerBinary); err != nil {
@@ -530,7 +530,7 @@ func (tm *TableManager) splitRoot(root Node, header IndexHeader, indexName strin
 		KeyCount:      int8(len(root.Values) - middle - 1),
 		Values:        root.Values[middle+1:],
 		ChildPointers: root.ChildPointers[middle+1:],
-		Address:       int64(header.FreeSpacePointer) + 8192,
+		Address:       int64(header.FreeSpacePointer) + NodeSize,
 	}
 
 	newRoot := Node{
@@ -557,7 +557,7 @@ func (tm *TableManager) splitRoot(root Node, header IndexHeader, indexName strin
 	}
 
 	header.NodeCount += 2
-	header.FreeSpacePointer += 8192 * 2
+	header.FreeSpacePointer += NodeSize * 2
 	header.Height++
 
 	headerBinary := SerializeIndexHeader(header)
@@ -591,7 +591,7 @@ func (tm *TableManager) CreateRecordListFile(tableName string, columnName string
 }
 
 func (tm *TableManager) GetRecordListFileHeader(fileName string) (RecordListFileHeader, error) {
-	headerBinary, err := tm.FileManager.Read(fileName, 0, 16)
+	headerBinary, err := tm.FileManager.Read(fileName, 0, RecordListHeaderSize)
 
 	if err != nil {
 		return RecordListFileHeader{}, err

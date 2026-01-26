@@ -112,18 +112,15 @@ func TestSerializeDeserializeRecord(t *testing.T) {
 		if deserialized.Items[1].Literal.(string) != "hello" {
 			t.Errorf("varchar mismatch, got %v", deserialized.Items[1].Literal)
 		}
-		// date and timestamp tests
 		if deserialized.Items[2].Literal.(string) != "2024-01-26" {
 			t.Errorf("date mismatch, got %v", deserialized.Items[2].Literal)
 		}
-		// timestamp serialization might change format slightly if it's RFC3339Nano
 		if deserialized.Items[3].Literal.(string) != "2024-01-26T12:00:00Z" {
 			t.Errorf("timestamp mismatch, got %v", deserialized.Items[3].Literal)
 		}
 		if deserialized.Items[4].Literal.(float64) != 3.14 {
 			t.Errorf("float mismatch, got %v", deserialized.Items[4].Literal)
 		}
-		// JSON col can be interface{} if unmarshaled
 		if _, ok := deserialized.Items[5].Literal.(map[string]any); !ok {
 			t.Errorf("json mismatch, expected map[string]any, got %T", deserialized.Items[5].Literal)
 		}

@@ -78,15 +78,7 @@ type TableManager struct {
 	FileManager *FileManager
 }
 
-type TableI interface {
-	CreateTable(name string, schema *Schema) error
-	Insert(tableName string, record Record) error
-	Delete(tableName string, filters []Filter) (int, error)
-	Update(tableName string, updatedFields map[string]any, filters []Filter) (int, error)
-	GetAllData(tableName string, filters []Filter, selectedColumns SelectedColumns) ([]map[string]any, error)
-	GetTableSchema(schemaName string) (Schema, error)
-	GetDataByLocation(tableName string, schema Schema, locations []RecordLocation, columnProjection map[int]ColumnProjection) []map[string]any
-
+type IndexI interface {
 	CreateIndex(tableName string, columnName string) error
 	GetIndexHeader(fileName string) (IndexHeader, error)
 	GetNodeById(fileName string, node_id int64) (Node, error)
@@ -102,6 +94,18 @@ type TableI interface {
 	CanUseIndexForFilters(tableName string, schema Schema, filters []Filter) (bool, []Filter)
 	GetRecordLocationsFromIndex(tableName string, filter Filter) ([]RecordLocation, error)
 	IntersectRecordLocations(locationSets [][]RecordLocation) []RecordLocation
+}
+
+type TableI interface {
+	CreateTable(name string, schema *Schema) error
+	Insert(tableName string, record Record) error
+	Delete(tableName string, filters []Filter) (int, error)
+	Update(tableName string, updatedFields map[string]any, filters []Filter) (int, error)
+	GetAllData(tableName string, filters []Filter, selectedColumns SelectedColumns) ([]map[string]any, error)
+	GetTableSchema(schemaName string) (Schema, error)
+	GetDataByLocation(tableName string, schema Schema, locations []RecordLocation, columnProjection map[int]ColumnProjection) []map[string]any
+
+	IndexI
 }
 
 const PageSize = 8192
@@ -219,7 +223,7 @@ func (tm *TableManager) Insert(tableName string, record Record) error {
 		return err
 	}
 
-	err = tm.FileManager.Write(tableName+".table", (int64(page_order)-1)*8192, page)
+	err = tm.FileManager.Write(tableName+".table", (int64(page_order)-1)*PageSize, page)
 
 	if err != nil {
 		fmt.Println(err.Error())
