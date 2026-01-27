@@ -36,10 +36,5 @@ jobs:
         run: go mod download
       
       - name: Run tests
-        run: go test -v ./src/storage
+        run: go test ./...
       
-      - name: Run tests with coverage
-        run: go test -v -coverprofile=coverage.out ./src/storage
-      
-      - name: Display coverage
-        run: go tool cover -func=coverage.out
